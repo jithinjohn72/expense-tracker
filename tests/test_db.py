@@ -1,14 +1,7 @@
 import sqlite3
 import pytest
 
-from core.db import get_connection, init_db
-
-@pytest.fixture
-def conn():
-    connection = get_connection(':memory:')
-    init_db(connection)
-    yield connection
-    connection.close()
+from core.db import init_db
     
 def table_names(conn):
     rows = conn.execute("SELECT name from sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlit_%'").fetchall()
