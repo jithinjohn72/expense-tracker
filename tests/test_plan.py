@@ -1,6 +1,7 @@
 import pytest
 
 from core.plan import create_plan, get_plan, set_savings_goal
+from core.plan import create_plan, get_plan, get_plan_for_date, set_savings_goal
 
 
 def test_create_plan_stores_dates_and_amounts(conn):
@@ -77,3 +78,29 @@ def test_changing_goal_of_unknown_plan_is_rejected(conn):
     with pytest.raises(ValueError):
         set_savings_goal(conn, 999, 100)
 
+def test_overlapping_cycle_is_rejected(conn):
+    create_plan(conn, "2026-11-01", 5000000)
+    with pytest.raises(ValueError):
+        create_plan(conn, "2026-11-15", 5000000)
+
+
+def test_the_next_cycle_right_after_is_allowed(conn):
+    create_plan(conn, "2026-11-01", 5000000)
+    create_plan(conn, "2026-12-01", 5000000)  # should not raise
+
+
+def test_plan_for_date_finds_the_cycle(conn):
+    plan_id = create_plan(conn, "2026-11-01", 5000000)
+    assert get_plan_for_date(conn, "2026-11-17")["id"] == plan_id
+
+
+def test_plan_for_date_works_on_first_and_last_day(conn):
+    plan_id = create_plan(conn, "2026-11-01", 5000000)
+    assert get_plan_for_date(conn, "2026-11-01")["id"] == plan_id
+    assert get_plan_for_date(conn, "2026-11-30")["id"] == plan_id
+
+
+def test_plan_for_date_without_a_plan_is_rejected(conn):
+    create_plan(conn, "2026-11-01", 5000000)
+    with pytest.raises(ValueError):
+        get_plan_for_date(conn, "2026-12-01")

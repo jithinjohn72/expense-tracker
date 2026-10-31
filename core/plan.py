@@ -15,6 +15,15 @@ def create_plan(
     end = cycle_end_for(start)
     check_paise(salary_paise, "Salary")
     check_paise(savings_goal_paise, "Savings goal", allow_zero=True)
+    
+    clash = conn.execute(
+        "SELECT cycle_start FROM monthly_plan WHERE cycle_start <= ? AND cycle_end >= ?",
+        (end.isoformat(), start.isoformat()),
+    ).fetchone()
+    if clash is not None:
+        raise ValueError(
+            f"This cycle overlaps the existing cycle starting {clash['cycle_start']}."
+        )
     try:
         cursor = conn.execute(
             "INSERT INTO monthly_plan (cycle_start, cycle_end, salary_paise, savings_goal_paise) "
@@ -35,6 +44,16 @@ def get_plan(conn: sqlite3.Connection, plan_id: int):
         raise ValueError(f"No plan with id {plan_id}.")
     return row
 
+def get_plan_for_date(conn: sqlite3.Connection, on_date: str):
+    """Return the plan whose cycle contains the given date."""
+    day = parse_date(on_date).isoformat()
+    row = conn.execute(
+        "SELECT * FROM monthly_plan WHERE cycle_start <= ? AND cycle_end >= ?",
+        (day, day),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No plan covers {day}. Create a plan for this period first.")
+    return row
 
 def set_savings_goal(conn: sqlite3.Connection, plan_id: int, new_goal_paise: int) -> None:
     """Change the extra-savings goal of a plan (for example after extra income)."""

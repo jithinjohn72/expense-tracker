@@ -1,8 +1,13 @@
 import pytest
 
 from core.plan import create_plan
-from core.transactions import add_credit, add_expense
-
+from core.transactions import (
+    add_credit,
+    add_expense,
+    category_totals,
+    daily_totals,
+    list_transactions,
+)
 
 def make_plan(conn):
     return create_plan(conn, "2026-11-01", 5000000)
@@ -73,3 +78,62 @@ def test_bad_date_text_is_rejected(conn):
     plan_id = make_plan(conn)
     with pytest.raises(ValueError):
         add_expense(conn, plan_id, "2 Nov 2026", 100)
+
+def test_category_is_trimmed_and_lowercased(conn):
+    plan_id = make_plan(conn)
+    row = get_row(conn, add_expense(conn, plan_id, "2026-11-02", 100, "", "  Food "))
+    assert row["category"] == "food"
+
+
+def test_blank_category_becomes_uncategorised(conn):
+    plan_id = make_plan(conn)
+    row = get_row(conn, add_expense(conn, plan_id, "2026-11-02", 100, "", "   "))
+    assert row["category"] == "uncategorised"
+
+
+def test_list_returns_newest_first(conn):
+    plan_id = make_plan(conn)
+    add_expense(conn, plan_id, "2026-11-02", 100, "older")
+    add_expense(conn, plan_id, "2026-11-09", 200, "newer")
+    names = [row["description"] for row in list_transactions(conn, plan_id)]
+    assert names == ["newer", "older"]
+
+
+def test_list_can_show_a_single_day(conn):
+    plan_id = make_plan(conn)
+    add_expense(conn, plan_id, "2026-11-02", 100, "a")
+    add_expense(conn, plan_id, "2026-11-03", 200, "b")
+    rows = list_transactions(conn, plan_id, "2026-11-03")
+    assert [row["description"] for row in rows] == ["b"]
+
+
+def test_list_leaves_out_other_cycles(conn):
+    first = make_plan(conn)
+    second = create_plan(conn, "2026-12-01", 5000000)
+    add_expense(conn, second, "2026-12-02", 100)
+    assert list_transactions(conn, first) == []
+
+
+def test_daily_totals_add_up_each_day(conn):
+    plan_id = make_plan(conn)
+    add_expense(conn, plan_id, "2026-11-02", 100)
+    add_expense(conn, plan_id, "2026-11-02", 250)
+    add_expense(conn, plan_id, "2026-11-05", 400)
+    assert daily_totals(conn, plan_id) == {"2026-11-02": 350, "2026-11-05": 400}
+
+
+def test_daily_totals_ignore_credits(conn):
+    plan_id = make_plan(conn)
+    add_credit(conn, plan_id, "2026-11-02", 999)
+    assert daily_totals(conn, plan_id) == {}
+
+
+def test_category_totals_are_sorted_biggest_first(conn):
+    plan_id = make_plan(conn)
+    add_expense(conn, plan_id, "2026-11-02", 100, "", "food")
+    add_expense(conn, plan_id, "2026-11-03", 500, "", "clothes")
+    add_expense(conn, plan_id, "2026-11-04", 200, "", "Food")
+    add_credit(conn, plan_id, "2026-11-05", 999)
+    totals = category_totals(conn, plan_id)
+    assert totals == {"clothes": 500, "food": 300}
+    assert list(totals) == ["clothes", "food"]

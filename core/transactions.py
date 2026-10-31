@@ -42,8 +42,10 @@ def add_expense(
     category: str = "uncategorised",
 ) -> int:
     """Record everyday spending (a debit) and return its id."""
-    return _add_transaction(conn, plan_id, txn_date, amount_paise, "debit", description, category)
-
+    clean_category = category.strip().lower() or "uncategorised"
+    return _add_transaction(
+        conn, plan_id, txn_date, amount_paise, "debit", description, clean_category
+    )
 
 def add_credit(
     conn: sqlite3.Connection,
@@ -56,3 +58,38 @@ def add_credit(
     return _add_transaction(
         conn, plan_id, txn_date, amount_paise, "credit", description, "extra income"
     )
+    
+def list_transactions(conn: sqlite3.Connection, plan_id: int, day: str = None) -> list:
+    """Return a cycle's transactions, newest first. Pass day to see just that date."""
+    if day is None:
+        return conn.execute(
+            "SELECT * FROM transactions WHERE plan_id = ? ORDER BY txn_date DESC, id DESC",
+            (plan_id,),
+        ).fetchall()
+    day_text = parse_date(day).isoformat()
+    return conn.execute(
+        "SELECT * FROM transactions WHERE plan_id = ? AND txn_date = ? ORDER BY id DESC",
+        (plan_id, day_text),
+    ).fetchall()
+
+
+def daily_totals(conn: sqlite3.Connection, plan_id: int) -> dict:
+    """Return {date: total spent that day} for a cycle. Credits are not included."""
+    rows = conn.execute(
+        "SELECT txn_date, SUM(amount_paise) AS total FROM transactions "
+        "WHERE plan_id = ? AND direction = 'debit' "
+        "GROUP BY txn_date ORDER BY txn_date",
+        (plan_id,),
+    ).fetchall()
+    return {row["txn_date"]: row["total"] for row in rows}
+
+
+def category_totals(conn: sqlite3.Connection, plan_id: int) -> dict:
+    """Return {category: total spent} for a cycle, biggest first. Credits are not included."""
+    rows = conn.execute(
+        "SELECT category, SUM(amount_paise) AS total FROM transactions "
+        "WHERE plan_id = ? AND direction = 'debit' "
+        "GROUP BY category ORDER BY total DESC, category",
+        (plan_id,),
+    ).fetchall()
+    return {row["category"]: row["total"] for row in rows}
