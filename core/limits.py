@@ -2,8 +2,8 @@
 import sqlite3
 
 from core.cycle import parse_date
-from core.fixed_items import fixed_totals
-from core.plan import get_plan
+from core.plan import carried_in, get_plan
+from core.summary import cycle_figures
 
 
 def daily_limit(conn: sqlite3.Connection, plan_id: int, on_date: str) -> dict:
@@ -16,7 +16,7 @@ def daily_limit(conn: sqlite3.Connection, plan_id: int, on_date: str) -> dict:
             f"Date {day_text} is outside this cycle "
             f"({plan['cycle_start']} to {plan['cycle_end']})."
         )
-    fixed = fixed_totals(conn)
+    figures = cycle_figures(conn, plan_id)
     row = conn.execute(
         "SELECT "
         "COALESCE(SUM(CASE WHEN direction = 'credit' AND txn_date <= ? "
@@ -31,10 +31,11 @@ def daily_limit(conn: sqlite3.Connection, plan_id: int, on_date: str) -> dict:
     pool_to_date = (
         plan["salary_paise"]
         + row["credits_to_date"]
-        - fixed["expense"]
-        - fixed["deposit"]
+        + carried_in(conn, plan_id)
+        - figures["fixed_expenses"]
+        - figures["deposits"]
         - plan["savings_goal_paise"]
-        # purchase-goal set-asides will be subtracted here in a later session
+        - figures["set_asides"]
     )
     available = pool_to_date - row["spent_before"]
     days_left = (parse_date(plan["cycle_end"]) - day).days + 1

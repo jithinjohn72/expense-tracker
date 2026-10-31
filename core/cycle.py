@@ -30,3 +30,12 @@ def cycle_days(start: date, end: date) -> int:
     """Number of days in a cycle, counting both the first and the last day."""
     return (end - start).days + 1
 
+def cycles_until(start: date, target: date) -> int:
+    """Count the pay cycles, from the one starting on `start`, that begin on or before `target`.
+
+    At least 1, so a goal that is due now or overdue is still funded from this cycle.
+    """
+    months = (target.year - start.year) * 12 + (target.month - start.month)
+    if target.day < start.day:
+        months -= 1
+    return max(months + 1, 1)

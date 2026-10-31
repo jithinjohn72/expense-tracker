@@ -2,6 +2,7 @@ from core.fixed_items import add_fixed_item, set_fixed_active
 from core.plan import create_plan, set_savings_goal
 from core.summary import cycle_summary
 from core.transactions import add_credit, add_expense
+from core.goals import add_goal
 
 
 def make_cycle(conn):
@@ -92,3 +93,14 @@ def test_transactions_of_another_cycle_do_not_leak(conn):
     summary = cycle_summary(conn, first)
     assert summary["extra_credits"] == 0
     assert summary["spent"] == 0
+    
+def test_goal_set_aside_lowers_the_pool(conn):
+    plan_id = make_cycle(conn)
+    add_goal(conn, "Phone", 1200000, "2027-04-10")
+    summary = cycle_summary(conn, plan_id)
+    assert summary["set_asides"] == 200000
+    assert summary["spendable_pool"] == 1800000
+
+
+def test_nothing_is_carried_in_by_default(conn):
+    assert cycle_summary(conn, make_cycle(conn))["carried_in"] == 0

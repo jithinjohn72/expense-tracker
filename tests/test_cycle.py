@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from core.cycle import cycle_days, cycle_end_for, parse_date
+from core.cycle import cycle_days, cycle_end_for, cycles_until, parse_date
 
 
 def test_parse_date_reads_iso_text():
@@ -49,3 +49,21 @@ def test_cycle_days_counts_both_ends():
     assert cycle_days(date(2026, 11, 1), date(2026, 11, 30)) == 30
     assert cycle_days(date(2027, 1, 28), date(2027, 2, 27)) == 31
 
+def test_cycles_until_within_the_current_cycle():
+    assert cycles_until(date(2026, 11, 1), date(2026, 11, 20)) == 1
+
+
+def test_cycles_until_counts_each_salary_day():
+    assert cycles_until(date(2026, 11, 1), date(2027, 4, 10)) == 6
+
+
+def test_cycles_until_is_at_least_one_when_overdue():
+    assert cycles_until(date(2026, 11, 1), date(2026, 9, 5)) == 1
+
+
+def test_cycles_until_target_before_the_next_salary_day():
+    assert cycles_until(date(2026, 11, 28), date(2026, 12, 10)) == 1
+
+
+def test_cycles_until_target_on_a_salary_day():
+    assert cycles_until(date(2026, 11, 28), date(2026, 12, 28)) == 2

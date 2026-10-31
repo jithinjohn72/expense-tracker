@@ -1,8 +1,8 @@
 import sqlite3
+from datetime import timedelta
 
 from core.cycle import cycle_end_for, parse_date
 from core.money import check_paise
-
 
 def create_plan(
     conn: sqlite3.Connection,
@@ -58,6 +58,7 @@ def get_plan_for_date(conn: sqlite3.Connection, on_date: str):
 def set_savings_goal(conn: sqlite3.Connection, plan_id: int, new_goal_paise: int) -> None:
     """Change the extra-savings goal of a plan (for example after extra income)."""
     check_paise(new_goal_paise, "Savings goal", allow_zero=True)
+    require_open(conn, plan_id)    
     cursor = conn.execute(
         "UPDATE monthly_plan SET savings_goal_paise = ? WHERE id = ?",
         (new_goal_paise, plan_id),
@@ -66,3 +67,26 @@ def set_savings_goal(conn: sqlite3.Connection, plan_id: int, new_goal_paise: int
         raise ValueError(f"No plan with id {plan_id}.")
     conn.commit()
     
+def is_closed(conn: sqlite3.Connection, plan_id: int) -> bool:
+    """True once a cycle has been closed."""
+    row = conn.execute("SELECT 1 FROM cycle_close WHERE plan_id = ?", (plan_id,)).fetchone()
+    return row is not None
+
+
+def require_open(conn: sqlite3.Connection, plan_id: int) -> None:
+    """Raise ValueError if the cycle is closed, because closed cycles are frozen."""
+    if is_closed(conn, plan_id):
+        raise ValueError("This cycle is closed and can no longer be changed.")
+
+
+def carried_in(conn: sqlite3.Connection, plan_id: int) -> int:
+    """Leftover money carried into this cycle from the cycle just before it (paise)."""
+    plan = get_plan(conn, plan_id)
+    previous_end = (parse_date(plan["cycle_start"]) - timedelta(days=1)).isoformat()
+    row = conn.execute(
+        "SELECT c.leftover_paise AS leftover FROM cycle_close c "
+        "JOIN monthly_plan p ON p.id = c.plan_id "
+        "WHERE p.cycle_end = ? AND c.leftover_action = 'carry'",
+        (previous_end,),
+    ).fetchone()
+    return row["leftover"] if row is not None else 0

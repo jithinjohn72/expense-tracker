@@ -6,7 +6,9 @@ from core.transactions import (
     add_expense,
     category_totals,
     daily_totals,
+    delete_transaction,
     list_transactions,
+    update_transaction,
 )
 
 def make_plan(conn):
@@ -137,3 +139,44 @@ def test_category_totals_are_sorted_biggest_first(conn):
     totals = category_totals(conn, plan_id)
     assert totals == {"clothes": 500, "food": 300}
     assert list(totals) == ["clothes", "food"]
+    
+def test_delete_removes_the_entry(conn):
+    plan_id = make_plan(conn)
+    keep = add_expense(conn, plan_id, "2026-11-02", 100)
+    mistake = add_expense(conn, plan_id, "2026-11-02", 5000)
+    delete_transaction(conn, mistake)
+    assert [row["id"] for row in list_transactions(conn, plan_id)] == [keep]
+    assert daily_totals(conn, plan_id) == {"2026-11-02": 100}
+
+
+def test_deleting_an_unknown_entry_is_rejected(conn):
+    with pytest.raises(ValueError):
+        delete_transaction(conn, 999)
+
+
+def test_update_changes_only_what_is_given(conn):
+    plan_id = make_plan(conn)
+    txn_id = add_expense(conn, plan_id, "2026-11-02", 5000, "lunch", "food")
+    update_transaction(conn, txn_id, amount_paise=500)
+    row = get_row(conn, txn_id)
+    assert row["amount_paise"] == 500
+    assert row["description"] == "lunch"
+    assert row["category"] == "food"
+
+
+def test_update_can_change_the_note_and_category(conn):
+    plan_id = make_plan(conn)
+    txn_id = add_expense(conn, plan_id, "2026-11-02", 500, "lunch", "food")
+    update_transaction(conn, txn_id, description="  dinner  ", category=" Eating Out ")
+    row = get_row(conn, txn_id)
+    assert row["description"] == "dinner"
+    assert row["category"] == "eating out"
+
+
+def test_update_rejects_a_bad_amount_or_unknown_entry(conn):
+    plan_id = make_plan(conn)
+    txn_id = add_expense(conn, plan_id, "2026-11-02", 500)
+    with pytest.raises(ValueError):
+        update_transaction(conn, txn_id, amount_paise=0)
+    with pytest.raises(ValueError):
+        update_transaction(conn, 999, amount_paise=100)

@@ -4,6 +4,7 @@ from core.fixed_items import add_fixed_item
 from core.limits import daily_limit
 from core.plan import create_plan
 from core.transactions import add_credit, add_expense
+from core.goals import add_goal
 
 
 def make_cycle(conn):
@@ -80,3 +81,8 @@ def test_date_outside_the_cycle_is_rejected(conn):
 def test_unknown_plan_is_rejected(conn):
     with pytest.raises(ValueError):
         daily_limit(conn, 999, "2026-11-01")
+        
+def test_a_goal_set_aside_lowers_the_limit(conn):
+    plan_id = make_cycle(conn)
+    add_goal(conn, "Phone", 1200000, "2027-04-10")  # 2,000 reserved each cycle
+    assert daily_limit(conn, plan_id, "2026-11-01")["limit"] == 1600000 // 30

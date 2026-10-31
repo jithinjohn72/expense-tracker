@@ -9,11 +9,12 @@ def table_names(conn):
 
     
 def test_all_tables_are_created(conn):
-    assert table_names(conn) == {"monthly_plan", "fixed_items", "transactions", "goals"}
+    assert table_names(conn) == {"monthly_plan", "fixed_items", "transactions", "goals", "cycle_close"}
 
-def test_db_can_run_twice(conn):
-    init_db(conn)
-    assert len(table_names(conn)) == 4
+
+def test_init_db_can_run_twice(conn):
+    init_db(conn)  # should not raise
+    assert len(table_names(conn)) == 5
     
 def test_negative_salary_is_rejected(conn):
     with pytest.raises(sqlite3.IntegrityError):
