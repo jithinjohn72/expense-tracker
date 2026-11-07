@@ -18,3 +18,9 @@ def money_row(label, value, bold=False):
             ft.Text(value, weight=weight),
         ]
     )
+    
+def short_rupees(paise):
+    """Whole rupees with commas, for tight spaces: 1234567 -> '12,345'. Zero gives ''."""
+    if paise == 0:
+        return ""
+    return f"{paise // 100:,}"

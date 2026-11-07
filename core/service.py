@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
 from core.cycle import MAX_SALARY_DAY, parse_date
 from core.fixed_items import (
@@ -19,7 +19,16 @@ from core.plan import (
     set_savings_goal,
 )
 from core.summary import cycle_summary
-from core.transactions import add_expense, list_transactions
+from core.transactions import (
+    add_credit,
+    add_expense,
+    category_totals,
+    daily_credit_totals,
+    daily_totals,
+    delete_transaction,
+    list_transactions,
+    update_transaction,
+)
 
 def home_view(conn: sqlite3.Connection, today: str):
     """Everything the home screen shows for one day, or None if no cycle covers it."""
@@ -164,3 +173,92 @@ def change_fixed_amount(conn: sqlite3.Connection, item_id: int, amount_text: str
 def switch_fixed(conn: sqlite3.Connection, item_id: int, active: bool) -> None:
     """Switch a fixed item on or off."""
     set_fixed_active(conn, item_id, bool(active))
+    
+def build_weeks(days: list) -> list:
+    """Arrange days into rows of seven, Monday first. Empty slots are None."""
+    if not days:
+        return []
+    cells = [None] * days[0]["weekday"] + list(days)
+    while len(cells) % 7 != 0:
+        cells.append(None)
+    return [cells[i : i + 7] for i in range(0, len(cells), 7)]
+
+
+def _cycle_covering(conn: sqlite3.Connection, day: date):
+    """The date as text if a cycle covers it, otherwise None."""
+    try:
+        get_plan_for_date(conn, day.isoformat())
+    except ValueError:
+        return None
+    return day.isoformat()
+
+
+def calendar_view(conn: sqlite3.Connection, anchor: str, today: str):
+    """Everything the calendar screen shows for the cycle containing `anchor`, or None."""
+    try:
+        plan = get_plan_for_date(conn, anchor)
+    except ValueError:
+        return None
+    start = parse_date(plan["cycle_start"])
+    end = parse_date(plan["cycle_end"])
+    spent = daily_totals(conn, plan["id"])
+    credited = daily_credit_totals(conn, plan["id"])
+    days = []
+    for offset in range((end - start).days + 1):
+        current = start + timedelta(days=offset)
+        text = current.isoformat()
+        days.append(
+            {
+                "date": text,
+                "day": current.day,
+                "weekday": current.weekday(),  # Monday is 0
+                "spent": spent.get(text, 0),
+                "credited": credited.get(text, 0),
+                "is_today": text == today,
+            }
+        )
+    return {
+        "plan": plan,
+        "days": days,
+        "weeks": build_weeks(days),
+        "categories": category_totals(conn, plan["id"]),
+        "previous_anchor": _cycle_covering(conn, start - timedelta(days=1)),
+        "next_anchor": _cycle_covering(conn, end + timedelta(days=1)),
+    }
+
+
+def day_view(conn: sqlite3.Connection, day: str) -> dict:
+    """The entries of one day. Raises ValueError if no cycle covers that day."""
+    plan = get_plan_for_date(conn, day)
+    return {"plan": plan, "entries": list_transactions(conn, plan["id"], day)}
+
+
+def add_entry_on_day(
+    conn: sqlite3.Connection,
+    day: str,
+    kind: str,
+    amount_text: str,
+    description: str = "",
+    category: str = "",
+) -> int:
+    """Add spending or extra money on any day of a cycle, from what the user typed."""
+    plan = get_plan_for_date(conn, day)
+    paise = rupees_to_paise(amount_text or "")
+    if kind == "spending":
+        return add_expense(
+            conn, plan["id"], day, paise, description or "", category or "uncategorised"
+        )
+    if kind == "credit":
+        return add_credit(conn, plan["id"], day, paise, description or "")
+    raise ValueError("Kind must be 'spending' or 'credit'.")
+
+
+def change_entry_amount(conn: sqlite3.Connection, txn_id: int, amount_text: str) -> None:
+    """Change the amount of an entry from what the user typed."""
+    update_transaction(conn, txn_id, amount_paise=rupees_to_paise(amount_text or ""))
+
+
+def remove_entry(conn: sqlite3.Connection, txn_id: int) -> None:
+    """Delete an entry."""
+    delete_transaction(conn, txn_id)
+    

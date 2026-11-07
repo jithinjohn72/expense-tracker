@@ -131,3 +131,13 @@ def update_transaction(
         (new_amount, new_description, new_category, txn_id),
     )
     conn.commit()
+    
+def daily_credit_totals(conn: sqlite3.Connection, plan_id: int) -> dict:
+    """Return {date: total of extra money received that day} for a cycle."""
+    rows = conn.execute(
+        "SELECT txn_date, SUM(amount_paise) AS total FROM transactions "
+        "WHERE plan_id = ? AND direction = 'credit' "
+        "GROUP BY txn_date ORDER BY txn_date",
+        (plan_id,),
+    ).fetchall()
+    return {row["txn_date"]: row["total"] for row in rows}

@@ -5,6 +5,7 @@ from core.transactions import (
     add_credit,
     add_expense,
     category_totals,
+    daily_credit_totals,
     daily_totals,
     delete_transaction,
     list_transactions,
@@ -180,3 +181,11 @@ def test_update_rejects_a_bad_amount_or_unknown_entry(conn):
         update_transaction(conn, txn_id, amount_paise=0)
     with pytest.raises(ValueError):
         update_transaction(conn, 999, amount_paise=100)
+        
+def test_daily_credit_totals_add_up_each_day_and_ignore_spending(conn):
+    plan_id = make_plan(conn)
+    add_credit(conn, plan_id, "2026-11-05", 300000)
+    add_credit(conn, plan_id, "2026-11-05", 50000)
+    add_credit(conn, plan_id, "2026-11-09", 10000)
+    add_expense(conn, plan_id, "2026-11-05", 999)
+    assert daily_credit_totals(conn, plan_id) == {"2026-11-05": 350000, "2026-11-09": 10000}

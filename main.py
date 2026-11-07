@@ -12,6 +12,7 @@ import flet as ft
 # Make sure Python can find the "core" folder, wherever the app is started from.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from calendar_screen import build_calendar_screen  # noqa: E402
 from core.db import get_connection, init_db  # noqa: E402
 from home_screen import build_home_screen  # noqa: E402
 from setup_screen import build_setup_screen  # noqa: E402
@@ -52,12 +53,17 @@ def main(page: ft.Page):
     def go_home(e=None):
         show("home")
 
+    def go_calendar(e=None):
+        show("calendar")
+
     def go_setup(e=None):
         show("setup")
 
     screens["home"] = build_home_screen(page, conn, today_text, go_setup)
+    screens["calendar"] = build_calendar_screen(page, conn, today_text)
     screens["setup"] = build_setup_screen(page, conn, today_text)
-    screens["setup"][0].visible = False  # the app starts on the home screen
+    screens["calendar"][0].visible = False  # the app starts on the home screen
+    screens["setup"][0].visible = False
 
     page.add(
         ft.SafeArea(
@@ -65,12 +71,15 @@ def main(page: ft.Page):
                 controls=[
                     ft.Text("Expense Tracker", size=24, weight=ft.FontWeight.BOLD),
                     ft.Row(
+                        wrap=True,
                         controls=[
                             ft.Button(content="Home", on_click=go_home),
+                            ft.Button(content="Calendar", on_click=go_calendar),
                             ft.Button(content="Setup", on_click=go_setup),
-                        ]
+                        ],
                     ),
                     screens["home"][0],
+                    screens["calendar"][0],
                     screens["setup"][0],
                 ],
             )

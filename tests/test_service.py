@@ -4,14 +4,20 @@ from core.fixed_items import list_fixed_items
 from core.goals import list_goals
 from core.plan import create_plan, get_plan
 from core.service import (
+    add_entry_on_day,
     add_fixed,
     add_spending_today,
+    build_weeks,
+    calendar_view,
+    change_entry_amount,
     change_fixed_amount,
     change_salary,
     change_savings_goal,
     cycle_start_for,
+    day_view,
     home_view,
     parse_salary_day,
+    remove_entry,
     seed_demo_data,
     setup_view,
     start_cycle,
@@ -197,3 +203,103 @@ def test_bad_fixed_item_input_gives_plain_errors(conn):
         change_fixed_amount(conn, 999, "100")
     with pytest.raises(ValueError):
         switch_fixed(conn, 999, True)
+
+def make_november(conn):
+    plan_id = create_plan(conn, "2026-11-01", 5000000)
+    add_entry_on_day(conn, "2026-11-02", "spending", "100", "tea", "Food")
+    add_entry_on_day(conn, "2026-11-02", "spending", "250", "lunch", "food")
+    add_entry_on_day(conn, "2026-11-05", "credit", "3000", "freelance")
+    return plan_id
+
+
+def test_weeks_start_on_monday_with_blank_slots(conn):
+    create_plan(conn, "2026-11-01", 1000)
+    weeks = calendar_view(conn, "2026-11-10", "2026-11-10")["weeks"]
+    # 1 Nov 2026 is a Sunday, so the first row has six blanks and then day 1
+    assert len(weeks) == 6
+    assert [slot is None for slot in weeks[0]] == [True] * 6 + [False]
+    assert weeks[0][6]["day"] == 1
+    assert weeks[5][0]["day"] == 30
+    assert weeks[5][1:] == [None] * 6
+
+
+def test_every_week_has_seven_slots_and_every_day_appears_once():
+    days = [{"day": n, "weekday": (n + 2) % 7} for n in range(1, 32)]  # starts on a Wednesday
+    weeks = build_weeks(days)
+    assert all(len(week) == 7 for week in weeks)
+    assert [slot["day"] for week in weeks for slot in week if slot] == list(range(1, 32))
+    assert build_weeks([]) == []
+
+
+def test_calendar_view_totals_each_day(conn):
+    make_november(conn)
+    view = calendar_view(conn, "2026-11-10", "2026-11-10")
+    assert len(view["days"]) == 30
+    assert view["days"][1]["spent"] == 35000  # 2 Nov: 100 + 250 rupees
+    assert view["days"][4]["credited"] == 300000  # 5 Nov
+    assert view["days"][0]["spent"] == 0
+    assert [day["is_today"] for day in view["days"]].count(True) == 1
+    assert view["categories"] == {"food": 35000}
+
+
+def test_calendar_view_is_none_when_no_cycle_covers_the_date(conn):
+    assert calendar_view(conn, "2026-11-10", "2026-11-10") is None
+
+
+def test_calendar_view_links_to_the_neighbouring_cycles(conn):
+    create_plan(conn, "2026-11-01", 5000000)
+    create_plan(conn, "2026-12-01", 5000000)
+    november = calendar_view(conn, "2026-11-10", "2026-11-10")
+    december = calendar_view(conn, "2026-12-10", "2026-11-10")
+    assert november["previous_anchor"] is None
+    assert november["next_anchor"] == "2026-12-01"
+    assert december["previous_anchor"] == "2026-11-30"
+    assert december["next_anchor"] is None
+
+
+def test_day_view_lists_that_days_entries(conn):
+    make_november(conn)
+    view = day_view(conn, "2026-11-02")
+    assert [entry["description"] for entry in view["entries"]] == ["lunch", "tea"]
+    assert day_view(conn, "2026-11-03")["entries"] == []
+    with pytest.raises(ValueError):
+        day_view(conn, "2026-12-03")
+
+
+def test_entries_can_be_added_on_any_day_from_text(conn):
+    make_november(conn)
+    add_entry_on_day(conn, "2026-11-20", "spending", "99.50")
+    entry = day_view(conn, "2026-11-20")["entries"][0]
+    assert entry["amount_paise"] == 9950
+    assert entry["direction"] == "debit"
+    assert entry["category"] == "uncategorised"
+
+
+def test_extra_money_added_on_a_day_is_a_credit(conn):
+    make_november(conn)
+    entry = day_view(conn, "2026-11-05")["entries"][0]
+    assert entry["direction"] == "credit"
+    assert entry["category"] == "extra income"
+
+
+def test_adding_an_entry_outside_any_cycle_or_with_bad_input_is_refused(conn):
+    make_november(conn)
+    with pytest.raises(ValueError):
+        add_entry_on_day(conn, "2026-12-20", "spending", "100")
+    with pytest.raises(ValueError):
+        add_entry_on_day(conn, "2026-11-20", "spending", "abc")
+    with pytest.raises(ValueError):
+        add_entry_on_day(conn, "2026-11-20", "gift", "100")
+
+
+def test_an_entry_amount_can_be_changed_and_deleted_from_text(conn):
+    make_november(conn)
+    entry_id = day_view(conn, "2026-11-02")["entries"][0]["id"]
+    change_entry_amount(conn, entry_id, "300")
+    assert day_view(conn, "2026-11-02")["entries"][0]["amount_paise"] == 30000
+    with pytest.raises(ValueError):
+        change_entry_amount(conn, entry_id, "0")
+    remove_entry(conn, entry_id)
+    assert len(day_view(conn, "2026-11-02")["entries"]) == 1
+    with pytest.raises(ValueError):
+        remove_entry(conn, entry_id)
