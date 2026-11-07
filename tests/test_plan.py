@@ -1,8 +1,6 @@
 import pytest
 
-from core.plan import create_plan, get_plan, set_savings_goal
-from core.plan import create_plan, get_plan, get_plan_for_date, set_savings_goal
-
+from core.plan import create_plan, get_plan, get_plan_for_date, set_salary, set_savings_goal
 
 def test_create_plan_stores_dates_and_amounts(conn):
     plan_id = create_plan(conn, "2026-11-01", 5000000, 500000)
@@ -104,3 +102,20 @@ def test_plan_for_date_without_a_plan_is_rejected(conn):
     create_plan(conn, "2026-11-01", 5000000)
     with pytest.raises(ValueError):
         get_plan_for_date(conn, "2026-12-01")
+        
+def test_salary_can_be_corrected(conn):
+    plan_id = create_plan(conn, "2026-11-01", 5000000)
+    set_salary(conn, plan_id, 5500000)
+    assert get_plan(conn, plan_id)["salary_paise"] == 5500000
+
+
+def test_salary_correction_rejects_zero_fractions_and_unknown_plans(conn):
+    plan_id = create_plan(conn, "2026-11-01", 5000000)
+    with pytest.raises(ValueError):
+        set_salary(conn, plan_id, 0)
+    with pytest.raises(ValueError):
+        set_salary(conn, plan_id, 100.5)
+    with pytest.raises(ValueError):
+        set_salary(conn, 999, 100)
+        
+        

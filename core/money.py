@@ -26,3 +26,11 @@ def check_paise(value, label: str, allow_zero: bool = False) -> None:
         raise ValueError(f"{label} cannot be negative.")
     if not allow_zero and value <= 0:
         raise ValueError(f"{label} must be greater than zero.")
+
+def paise_to_plain_text(paise: int) -> str:
+    """Format paise as plain text for a text box, e.g. 5000000 -> '50000' and 1250 -> '12.50'."""
+    sign = "-" if paise < 0 else ""
+    rupees, remainder = divmod(abs(paise), 100)
+    if remainder == 0:
+        return f"{sign}{rupees}"
+    return f"{sign}{rupees}.{remainder:02d}"

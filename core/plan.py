@@ -90,3 +90,15 @@ def carried_in(conn: sqlite3.Connection, plan_id: int) -> int:
         (previous_end,),
     ).fetchone()
     return row["leftover"] if row is not None else 0
+
+def set_salary(conn: sqlite3.Connection, plan_id: int, new_salary_paise: int) -> None:
+    """Correct the salary of a cycle that is still open."""
+    check_paise(new_salary_paise, "Salary")
+    require_open(conn, plan_id)
+    cursor = conn.execute(
+        "UPDATE monthly_plan SET salary_paise = ? WHERE id = ?",
+        (new_salary_paise, plan_id),
+    )
+    if cursor.rowcount == 0:
+        raise ValueError(f"No plan with id {plan_id}.")
+    conn.commit()

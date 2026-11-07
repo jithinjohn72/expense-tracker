@@ -4,7 +4,7 @@ from core.closing import close_cycle, savings_totals
 from core.fixed_items import add_fixed_item
 from core.goals import add_goal, get_goal
 from core.limits import daily_limit
-from core.plan import create_plan, set_savings_goal
+from core.plan import create_plan, set_salary, set_savings_goal
 from core.summary import cycle_summary
 from core.transactions import add_expense, delete_transaction, update_transaction
 
@@ -142,3 +142,10 @@ def test_a_closed_cycle_rejects_editing_and_deleting_entries(conn):
         update_transaction(conn, txn_id, amount_paise=100)
     with pytest.raises(ValueError):
         delete_transaction(conn, txn_id)
+        
+def test_a_closed_cycle_rejects_a_salary_correction(conn):
+    plan_id = spend_and_finish(conn, 1500000)
+    close_cycle(conn, plan_id, "2026-12-01")
+    with pytest.raises(ValueError):
+        set_salary(conn, plan_id, 9999900)
+        

@@ -1,7 +1,7 @@
 
 import pytest
 
-from core.money import paise_to_rupees_text, rupees_to_paise, check_paise
+from core.money import check_paise, paise_to_plain_text, paise_to_rupees_text, rupees_to_paise
 
 
 def test_whole_rupees_convert_to_paise():
@@ -63,3 +63,17 @@ def test_check_paise_rejects_floats_and_booleans():
         check_paise(10.5, "Amount")
     with pytest.raises(ValueError):
         check_paise(True, "Amount")
+        
+def test_plain_text_drops_zero_paise():
+    assert paise_to_plain_text(5000000) == "50000"
+
+
+def test_plain_text_keeps_paise_when_there_are_some():
+    assert paise_to_plain_text(1250) == "12.50"
+    assert paise_to_plain_text(5) == "0.05"
+
+
+def test_plain_text_round_trips_through_rupees_to_paise():
+    for paise in [0, 5, 1250, 5000000, 123456789]:
+        assert rupees_to_paise(paise_to_plain_text(paise)) == paise
+        
