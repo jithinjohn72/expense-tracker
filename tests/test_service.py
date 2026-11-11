@@ -3,9 +3,11 @@ import pytest
 from core.fixed_items import list_fixed_items
 from core.goals import list_goals
 from core.plan import create_plan, get_plan
+
 from core.service import (
     add_entry_on_day,
     add_fixed,
+    add_goal_from_text,
     add_spending_today,
     build_weeks,
     calendar_view,
@@ -13,16 +15,25 @@ from core.service import (
     change_fixed_amount,
     change_salary,
     change_savings_goal,
+    close_oldest_cycle,
     cycle_start_for,
     day_view,
+    goals_view,
     home_view,
+    list_backups,
+    make_backup,
+    month_end_view,
     parse_salary_day,
     remove_entry,
+    restore_from_path,
     seed_demo_data,
     setup_view,
     start_cycle,
     switch_fixed,
+    switch_goal,
+    top_up_goal,
 )
+
 from core.transactions import list_transactions
 
 def test_home_view_is_none_when_no_cycle_covers_today(conn):
@@ -303,3 +314,140 @@ def test_an_entry_amount_can_be_changed_and_deleted_from_text(conn):
     assert len(day_view(conn, "2026-11-02")["entries"]) == 1
     with pytest.raises(ValueError):
         remove_entry(conn, entry_id)
+        
+        
+def make_october(conn, goal=""):
+    """A cycle that has finished: salary 50,000, rent 20,000, and 5,000 spent."""
+    start_cycle(conn, "2026-10-10", "1", "50000", goal)
+    add_fixed(conn, "Rent", "expense", "20000")
+    add_entry_on_day(conn, "2026-10-05", "spending", "5000", "shopping", "shopping")
+
+
+def test_goals_view_without_a_cycle_has_no_set_aside(conn):
+    add_goal_from_text(conn, "Phone", "12000", "2027-04-10")
+    view = goals_view(conn, "2026-11-10")
+    assert view["plan"] is None
+    assert view["goals"][0]["set_aside"] == 0
+    assert view["total_set_aside"] == 0
+
+
+def test_goals_view_shows_progress_and_the_set_aside(conn):
+    start_cycle(conn, "2026-11-10", "1", "50000")
+    add_goal_from_text(conn, "Phone", "12000", "2027-04-10", "2000")
+    goal = goals_view(conn, "2026-11-10")["goals"][0]
+    assert goal["remaining"] == 1000000
+    assert goal["set_aside"] == 166667  # 10,000 over 6 cycles, rounded up
+    assert abs(goal["progress"] - 2000 / 12000) < 1e-9
+    assert goals_view(conn, "2026-11-10")["total_set_aside"] == 166667
+
+
+def test_a_switched_off_goal_has_no_set_aside_but_stays_listed(conn):
+    start_cycle(conn, "2026-11-10", "1", "50000")
+    goal_id = add_goal_from_text(conn, "Phone", "12000", "2027-04-10")
+    switch_goal(conn, goal_id, False)
+    view = goals_view(conn, "2026-11-10")
+    assert view["goals"][0]["active"] is False
+    assert view["goals"][0]["set_aside"] == 0
+    assert view["total_set_aside"] == 0
+    switch_goal(conn, goal_id, True)
+    assert goals_view(conn, "2026-11-10")["goals"][0]["set_aside"] > 0
+
+
+def test_bad_goal_input_gives_plain_errors(conn):
+    with pytest.raises(ValueError):
+        add_goal_from_text(conn, "", "100", "2027-04-10")
+    with pytest.raises(ValueError):
+        add_goal_from_text(conn, "Phone", "abc", "2027-04-10")
+    with pytest.raises(ValueError):
+        add_goal_from_text(conn, "Phone", "100", "10-04-2027")
+    with pytest.raises(ValueError):
+        add_goal_from_text(conn, "Phone", "100", "2027-04-10", "200")
+
+
+def test_a_goal_can_be_topped_up_from_text(conn):
+    goal_id = add_goal_from_text(conn, "Phone", "12000", "2027-04-10", "1000")
+    top_up_goal(conn, goal_id, "500")
+    assert goals_view(conn, "2026-11-10")["goals"][0]["saved"] == 150000
+    with pytest.raises(ValueError):
+        top_up_goal(conn, goal_id, "0")
+
+
+def test_nothing_waits_to_be_closed_while_the_cycle_is_running(conn):
+    make_october(conn)
+    view = month_end_view(conn, "2026-10-20")
+    assert view["to_close"] is None
+    assert view["current"] is not None
+
+
+def test_a_finished_cycle_waits_to_be_closed(conn):
+    make_october(conn)
+    view = month_end_view(conn, "2026-11-02")
+    assert view["to_close"]["plan"]["cycle_start"] == "2026-10-01"
+    assert view["to_close"]["summary"]["left_to_spend"] == 2500000
+    assert view["current"] is None
+
+
+def test_the_oldest_finished_cycle_comes_first(conn):
+    make_october(conn)
+    start_cycle(conn, "2026-11-10", "1", "50000")
+    assert month_end_view(conn, "2026-12-05")["to_close"]["plan"]["cycle_start"] == "2026-10-01"
+    close_oldest_cycle(conn, "2026-12-05", "savings")
+    assert month_end_view(conn, "2026-12-05")["to_close"]["plan"]["cycle_start"] == "2026-11-01"
+
+
+def test_closing_to_savings_updates_the_history_and_the_totals(conn):
+    make_october(conn, goal="3000")
+    result = close_oldest_cycle(conn, "2026-11-02", "savings")
+    assert result["leftover"] == 2200000  # 50,000 - 20,000 - 3,000 - 5,000
+    view = month_end_view(conn, "2026-11-02")
+    assert view["to_close"] is None
+    assert view["history"][0]["saved"] == 2500000  # the 3,000 goal plus the 22,000 leftover
+    assert view["totals"]["total_saved"] == 2500000
+
+
+def test_closing_with_carry_keeps_the_leftover_out_of_savings(conn):
+    make_october(conn, goal="3000")
+    close_oldest_cycle(conn, "2026-11-02", "carry")
+    view = month_end_view(conn, "2026-11-02")
+    assert view["history"][0]["saved"] == 300000  # only the goal
+    assert view["history"][0]["action"] == "carry"
+    start_cycle(conn, "2026-11-10", "1", "50000")
+    assert home_view(conn, "2026-11-10")["summary"]["carried_in"] == 2200000
+
+
+def test_closing_with_nothing_waiting_or_a_bad_action_is_refused(conn):
+    with pytest.raises(ValueError):
+        close_oldest_cycle(conn, "2026-11-02", "savings")
+    make_october(conn)
+    with pytest.raises(ValueError):
+        close_oldest_cycle(conn, "2026-11-02", "spend it")
+    with pytest.raises(ValueError):
+        close_oldest_cycle(conn, "2026-10-20", "savings")
+
+
+def test_a_backup_gets_a_dated_name_and_backups_list_newest_first(conn, tmp_path):
+    folder = str(tmp_path / "backups")
+    assert list_backups(folder) == []
+    first = make_backup(conn, folder, "2026-11-07")
+    make_backup(conn, folder, "2026-11-08")
+    assert first.endswith("expense-backup-2026-11-07.db")
+    assert list_backups(folder) == ["expense-backup-2026-11-08.db", "expense-backup-2026-11-07.db"]
+
+
+def test_restoring_from_a_typed_path_replaces_the_data(conn, tmp_path):
+    add_fixed(conn, "Rent", "expense", "15000")
+    path = make_backup(conn, str(tmp_path / "backups"), "2026-11-07")
+    add_fixed(conn, "Gym", "expense", "1000")
+    restore_from_path(conn, '  "' + path + '"  ')  # quotes and spaces are tolerated
+    names = [item["name"] for item in setup_view(conn, "2026-11-07")["fixed_items"]]
+    assert names == ["Rent"]
+
+
+def test_restoring_refuses_blank_missing_and_wrong_files(conn, tmp_path):
+    for bad in ["", "   ", None, str(tmp_path / "nothing.db")]:
+        with pytest.raises(ValueError):
+            restore_from_path(conn, bad)
+    junk = tmp_path / "junk.db"
+    junk.write_text("not a database")
+    with pytest.raises(ValueError):
+        restore_from_path(conn, str(junk))

@@ -14,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from calendar_screen import build_calendar_screen  # noqa: E402
 from core.db import get_connection, init_db  # noqa: E402
+from goals_screen import build_goals_screen  # noqa: E402
 from home_screen import build_home_screen  # noqa: E402
+from monthend_screen import build_monthend_screen  # noqa: E402
 from setup_screen import build_setup_screen  # noqa: E402
 
 
@@ -35,8 +37,10 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     page.theme_mode = ft.ThemeMode.LIGHT
 
-    conn = get_connection(app_db_path())
+    db_path = app_db_path()
+    conn = get_connection(db_path)
     init_db(conn)
+    backup_folder = str(Path(db_path).parent / "backups")
 
     def today_text():
         return date.today().isoformat()
@@ -56,14 +60,22 @@ def main(page: ft.Page):
     def go_calendar(e=None):
         show("calendar")
 
+    def go_goals(e=None):
+        show("goals")
+
+    def go_monthend(e=None):
+        show("monthend")
+
     def go_setup(e=None):
         show("setup")
 
     screens["home"] = build_home_screen(page, conn, today_text, go_setup)
     screens["calendar"] = build_calendar_screen(page, conn, today_text)
+    screens["goals"] = build_goals_screen(page, conn, today_text)
+    screens["monthend"] = build_monthend_screen(page, conn, today_text, backup_folder)
     screens["setup"] = build_setup_screen(page, conn, today_text)
-    screens["calendar"][0].visible = False  # the app starts on the home screen
-    screens["setup"][0].visible = False
+    for name in ["calendar", "goals", "monthend", "setup"]:
+        screens[name][0].visible = False  # the app starts on the home screen
 
     page.add(
         ft.SafeArea(
@@ -75,11 +87,15 @@ def main(page: ft.Page):
                         controls=[
                             ft.Button(content="Home", on_click=go_home),
                             ft.Button(content="Calendar", on_click=go_calendar),
+                            ft.Button(content="Goals", on_click=go_goals),
+                            ft.Button(content="Month end", on_click=go_monthend),
                             ft.Button(content="Setup", on_click=go_setup),
                         ],
                     ),
                     screens["home"][0],
                     screens["calendar"][0],
+                    screens["goals"][0],
+                    screens["monthend"][0],
                     screens["setup"][0],
                 ],
             )

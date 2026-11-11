@@ -1,6 +1,9 @@
 import sqlite3
 from datetime import date, timedelta
+from pathlib import Path
 
+from core.backup import backup_database, restore_database
+from core.closing import close_cycle, savings_totals
 from core.cycle import MAX_SALARY_DAY, parse_date
 from core.fixed_items import (
     add_fixed_item,
@@ -9,7 +12,7 @@ from core.fixed_items import (
     set_fixed_active,
     update_fixed_amount,
 )
-from core.goals import add_goal, list_goals
+from core.goals import add_goal, add_to_goal, goal_set_aside, list_goals, set_goal_active
 from core.limits import daily_limit
 from core.money import paise_to_plain_text, rupees_to_paise
 from core.plan import (
@@ -262,3 +265,137 @@ def remove_entry(conn: sqlite3.Connection, txn_id: int) -> None:
     """Delete an entry."""
     delete_transaction(conn, txn_id)
     
+def goals_view(conn: sqlite3.Connection, today: str) -> dict:
+    """Everything the goals screen shows."""
+    try:
+        plan = get_plan_for_date(conn, today)
+    except ValueError:
+        plan = None
+    goals = []
+    total_set_aside = 0
+    for goal in list_goals(conn, active_only=False):
+        active = bool(goal["active"])
+        set_aside = 0
+        if plan is not None and active:
+            set_aside = goal_set_aside(goal, plan["cycle_start"])
+        total_set_aside += set_aside
+        goals.append(
+            {
+                "id": goal["id"],
+                "name": goal["name"],
+                "price": goal["price_paise"],
+                "saved": goal["saved_paise"],
+                "remaining": goal["price_paise"] - goal["saved_paise"],
+                "target_date": goal["target_date"],
+                "active": active,
+                "set_aside": set_aside,
+                "progress": goal["saved_paise"] / goal["price_paise"],  # 0 to 1, for a progress bar
+            }
+        )
+    return {
+        "plan": plan,
+        "goals": goals,
+        "total_set_aside": total_set_aside,
+        "saved_for_goals": savings_totals(conn)["saved_for_goals"],
+    }
+
+
+def add_goal_from_text(
+    conn: sqlite3.Connection,
+    name: str,
+    price_text: str,
+    target_date_text: str,
+    saved_text: str = "",
+) -> int:
+    """Add a purchase goal from what the user typed."""
+    saved = (saved_text or "").strip() or "0"
+    return add_goal(
+        conn,
+        name or "",
+        rupees_to_paise(price_text or ""),
+        (target_date_text or "").strip(),
+        rupees_to_paise(saved),
+    )
+
+
+def top_up_goal(conn: sqlite3.Connection, goal_id: int, amount_text: str) -> None:
+    """Record extra money saved towards a goal, from what the user typed."""
+    add_to_goal(conn, goal_id, rupees_to_paise(amount_text or ""))
+
+
+def switch_goal(conn: sqlite3.Connection, goal_id: int, active: bool) -> None:
+    """Switch a goal on or off."""
+    set_goal_active(conn, goal_id, bool(active))
+
+
+def month_end_view(conn: sqlite3.Connection, today: str) -> dict:
+    """Everything the month-end screen shows."""
+    today_text = parse_date(today).isoformat()
+    waiting = conn.execute(
+        "SELECT * FROM monthly_plan WHERE cycle_end < ? "
+        "AND id NOT IN (SELECT plan_id FROM cycle_close) ORDER BY cycle_start LIMIT 1",
+        (today_text,),
+    ).fetchone()
+    to_close = None
+    if waiting is not None:
+        to_close = {"plan": waiting, "summary": cycle_summary(conn, waiting["id"])}
+    rows = conn.execute(
+        "SELECT p.cycle_start, p.cycle_end, p.savings_goal_paise AS goal, "
+        "c.leftover_paise AS leftover, c.leftover_action AS action, c.closed_on "
+        "FROM cycle_close c JOIN monthly_plan p ON p.id = c.plan_id "
+        "ORDER BY p.cycle_start DESC"
+    ).fetchall()
+    history = [
+        {
+            "cycle_start": row["cycle_start"],
+            "cycle_end": row["cycle_end"],
+            "leftover": row["leftover"],
+            "action": row["action"],
+            "saved": row["goal"] + (row["leftover"] if row["action"] == "savings" else 0),
+            "closed_on": row["closed_on"],
+        }
+        for row in rows
+    ]
+    try:
+        current = get_plan_for_date(conn, today_text)
+    except ValueError:
+        current = None
+    return {
+        "to_close": to_close,
+        "history": history,
+        "totals": savings_totals(conn),
+        "current": current,
+    }
+
+
+def close_oldest_cycle(conn: sqlite3.Connection, today: str, action: str) -> dict:
+    """Close the oldest finished cycle that is still open."""
+    view = month_end_view(conn, today)
+    if view["to_close"] is None:
+        raise ValueError("No finished cycle is waiting to be closed.")
+    return close_cycle(conn, view["to_close"]["plan"]["id"], today, action)
+
+
+def make_backup(conn: sqlite3.Connection, folder: str, today: str) -> str:
+    """Save a copy of the whole database in `folder`. Returns the path of the new file."""
+    stamp = parse_date(today).isoformat()
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    target = Path(folder) / f"expense-backup-{stamp}.db"
+    backup_database(conn, str(target))
+    return str(target)
+
+
+def list_backups(folder: str) -> list:
+    """File names of the backups in `folder`, newest first."""
+    path = Path(folder)
+    if not path.is_dir():
+        return []
+    return sorted((item.name for item in path.glob("expense-backup-*.db")), reverse=True)
+
+
+def restore_from_path(conn: sqlite3.Connection, path_text: str) -> None:
+    """Replace all data with a backup file whose path the user typed or pasted."""
+    cleaned = (path_text or "").strip().strip('"').strip("'")
+    if not cleaned:
+        raise ValueError("Type or paste the path of a backup file.")
+    restore_database(conn, cleaned)
