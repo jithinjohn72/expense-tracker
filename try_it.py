@@ -18,7 +18,7 @@ the code that produced it.
 import sys
 import tempfile
 from pathlib import Path
-
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from core.backup import backup_database, restore_database
 from core.closing import close_cycle, savings_totals
 from core.db import get_connection, init_db

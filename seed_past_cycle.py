@@ -10,6 +10,8 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
 from core.db import get_connection, init_db
 from core.plan import get_plan_for_date
 from core.service import add_entry_on_day, start_cycle
